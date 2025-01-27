@@ -1,0 +1,12 @@
+### VS Code ###
+.vscode/
+.vs
+
+### build file ###
+php2html/*
+x64
+
+### temporary project file ###
+*.filters
+*.user
+*.aps
