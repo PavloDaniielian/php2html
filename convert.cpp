@@ -7,6 +7,20 @@
 
 namespace fs = std::filesystem;
 
+std::string trim(std::string s) {
+    // Trim leading whitespace
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
+        return !std::isspace(ch);
+        }));
+
+    // Trim trailing whitespace
+    s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) {
+        return !std::isspace(ch);
+        }).base(), s.end());
+
+    return s;
+}
+
 // Utility function to log events in the event log
 void AddLog(HWND hwnd, const std::string& logMessage)
 {
@@ -33,56 +47,99 @@ void ProcessPhpFile(const std::string& filePath, const std::string& htmlDir, HWN
 
     if (inFile && outFile)
     {
-        std::string line;
-        int inBlock = 0;    // 1: comment, 2: php, 3: script, 4: removing div, 5: removing a
+        std::string line, prefix;
         int removeDivTags = 0, skipDivTagsToRemove = 0;
         while (std::getline(inFile, line))
         {
-            // process removing block terminal
-            switch (inBlock) {
-            case 1: // comment block
-                if (line.find("-->") != std::string::npos)
-                {
-                    line = line.substr(line.find("-->") + 3);
-                    inBlock = 0;
-                    if (line.length() > 0)
-                        break;
+            size_t t = std::string::npos, t1, t2;
+            bool removedOnce;
+            // remove special block
+            do {
+                removedOnce = false;
+                // remove comment block
+                t = line.find("<!--");
+                if (t != std::string::npos) {
+                    prefix = line.substr(0, t);
+                    line = line.substr(t + 4);
+                    do {
+                        t = line.find("-->");
+                        if (t != std::string::npos) {
+                            line = prefix + line.substr(t + 3);
+                            removedOnce = true;
+                            break;
+                        }
+                    } while (std::getline(inFile, line));
                 }
-                continue;
-            case 2: // php block
-                if (line.find("?>") != std::string::npos)
-                {
-                    line = line.substr(line.find("?>") + 2);
-                    inBlock = 0;
-                    if (line.length() > 0)
-                        break;
+                // remove php block
+                t = line.find("<?php");
+                if (t != std::string::npos) {
+                    prefix = line.substr(0, t);
+                    line = line.substr(t + 5);
+                    do {
+                        t = line.find("?>");
+                        if (t != std::string::npos) {
+                            line = prefix + line.substr(t + 2);
+                            removedOnce = true;
+                            break;
+                        }
+                    } while (std::getline(inFile, line));
                 }
-                continue;
-            case 3: // script block
-                if (line.find("</script>") != std::string::npos)
-                {
-                    line = line.substr(line.find("</script>") + 9);
-                    inBlock = 0;
-                    if (line.length() > 0)
-                        break;
+                // remove script block
+                t = line.find("<script");
+                if (t != std::string::npos) {
+                    prefix = line.substr(0, t);
+                    line = line.substr(t + 7);
+                    do {
+                        t = line.find("</script>");
+                        if (t != std::string::npos) {
+                            line = prefix + line.substr(t + 9);
+                            removedOnce = true;
+                            break;
+                        }
+                    } while (std::getline(inFile, line));
                 }
-                continue;
-            case 4: // removing div
-                if (line.find("<div") != std::string::npos)
-                    skipDivTagsToRemove++;
-                if (line.find("</div>") != std::string::npos)
-                {
-                    if (skipDivTagsToRemove > 0)
-                        skipDivTagsToRemove--;
-                    else
-                        inBlock = 0;
+                // remove special div block
+                t = line.find("id=\"noreseller\"");
+                if (t != std::string::npos) {
+                    prefix = line.substr(0, line.find("<div"));
+                    line = line.substr(t + 15);
+                    while (true) {
+                        t1 = line.find("<div");
+                        t2 = line.find("</div>");
+                        if (t1 < t2) {
+                            skipDivTagsToRemove++;
+                            line = line.substr(t1 + 5);
+                        }
+                        else if (t2 < t1) {
+                            if (skipDivTagsToRemove > 0) {
+                                skipDivTagsToRemove--;
+                                line = line.substr(t2 + 6);
+                            }
+                            else {
+                                line = prefix + line.substr(t2 + 6);
+                                removedOnce = true;
+                                break;
+                            }
+                        }
+                        else
+                            std::getline(inFile, line);
+                    }
                 }
-                continue;
-            case 5: // removing a
-                if (line.find("</a>") != std::string::npos)
-                    inBlock = 0;
-                continue;
-            }
+                // remove script a tag
+                t = line.find("href=\"https://warriorplus.com/o2\"");
+                if (t != std::string::npos) {
+                    prefix = line.substr(0, line.find("<a"));
+                    line = line.substr(t + 15);
+                    do {
+                        t = line.find("</a>");
+                        if (t != std::string::npos) {
+                            line = prefix + line.substr(t + 4);
+                            removedOnce = true;
+                            break;
+                        }
+                    } while (std::getline(inFile, line));
+                }
+            } while (removedOnce);
 
             // Remove unwanted divs
             if (line.find("<div class=\"bg") != std::string::npos) {
@@ -90,7 +147,7 @@ void ProcessPhpFile(const std::string& filePath, const std::string& htmlDir, HWN
                 std::getline(inFile, line);
                 if (line.find("<div class=\"content\"") != std::string::npos) {
                     removeDivTags++;
-                    std::getline(inFile, line);
+                    continue;
                 }
             }
             if ( removeDivTags > 0 ){
@@ -101,7 +158,6 @@ void ProcessPhpFile(const std::string& filePath, const std::string& htmlDir, HWN
                         skipDivTagsToRemove--;
                     else {
                         removeDivTags--;
-                        std::getline(inFile, line);
                         continue;
                     }
                 }
@@ -131,44 +187,8 @@ void ProcessPhpFile(const std::string& filePath, const std::string& htmlDir, HWN
             std::regex urlRegex("PRODUCT NAME");
             line = std::regex_replace(line, urlRegex, productName);
 
-            // process removing block start
-            if (!inBlock) {
-                if (line.find("<!--") != std::string::npos) {
-                    size_t t = line.find("-->");
-                    if (t == std::string::npos) {
-                        line = line.substr(0, line.find("<!--"));
-                        inBlock = 1;
-                    }else
-                        line = line.substr(0, line.find("<!--")) + line.substr(t + 3);
-                }else if (line.find("<?php") != std::string::npos) {
-                    size_t t = line.find("?>");
-                    if (t == std::string::npos){
-                        line = line.substr(0, line.find("<?php"));
-                        inBlock = 2;
-                    }else
-                        line = line.substr(0, line.find("<?php")) + line.substr(t + 2);
-                }else if (line.find("<script") != std::string::npos) {
-                    size_t t = line.find("</script>");
-                    if (t == std::string::npos) {
-                        line = line.substr(0, line.find("<script"));
-                        inBlock = 3;
-                    }else
-                        line = line.substr(0, line.find("<script")) + line.substr(t + 9);
-                }else if (line.find("<div") != std::string::npos && line.find("id=\"noreseller\"") != std::string::npos) {
-                    inBlock = 4;
-                    line = line.substr(0, line.find("<div"));
-                }else if (line.find("<a") != std::string::npos && line.find("href=\"https://warriorplus.com/o2") != std::string::npos) {
-                    size_t t = line.find("</a>");
-                    if (t == std::string::npos) {
-                        line = line.substr(0, line.find("<a"));
-                        inBlock = 5;
-                    }
-                    else
-                        line = line.substr(0, line.find("<a")) + line.substr(t + 2);
-                }
-            }
             // Write modified line
-            if (line.length() > 0)
+            if ( trim(line).length() > 0 )
                 outFile << line << "\n";
         }
 
