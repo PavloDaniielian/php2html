@@ -182,13 +182,13 @@ void CreateControls(HWND hwnd)
     hProductName = CreateWindow("EDIT", "Product Name", WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 140, 400, 20, hwnd, NULL, NULL, NULL);
 
     CreateWindow("STATIC", "Classes to Keep:", WS_VISIBLE | WS_CHILD, 20, 180, 150, 20, hwnd, NULL, NULL, NULL);
-    hClassField = CreateWindow("EDIT", "", WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 180, 400, 20, hwnd, NULL, NULL, NULL);
+    hClassField = CreateWindow("EDIT", "staatliches", WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 180, 400, 20, hwnd, NULL, NULL, NULL);
 
     CreateWindow("STATIC", "Replace Directory:", WS_VISIBLE | WS_CHILD, 20, 220, 150, 20, hwnd, NULL, NULL, NULL);
     hReplaceDir = CreateWindow("EDIT", "DIR", WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 220, 400, 20, hwnd, NULL, NULL, NULL);
 
     CreateWindow("STATIC", "Your Link:", WS_VISIBLE | WS_CHILD, 20, 260, 150, 20, hwnd, NULL, NULL, NULL);
-    HWND hYourLink = CreateWindow("EDIT", "Your Link", WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 260, 400, 20, hwnd, (HMENU)6, NULL, NULL);
+    HWND hYourLink = CreateWindow("EDIT", "https://YourLink", WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 260, 400, 20, hwnd, (HMENU)6, NULL, NULL);
 
     hCheckboxDelete = CreateWindow("BUTTON", "Delete Uncompressed Files", WS_VISIBLE | WS_CHILD | BS_AUTOCHECKBOX, 20, 300, 200, 20, hwnd, NULL, NULL, NULL);
 

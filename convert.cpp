@@ -34,60 +34,142 @@ void ProcessPhpFile(const std::string& filePath, const std::string& htmlDir, HWN
     if (inFile && outFile)
     {
         std::string line;
-        bool inPhpBlock = false;
-        bool inHtmlCommentBlock = false;
-        bool inScriptBlock = false;
+        int inBlock = 0;    // 1: comment, 2: php, 3: script, 4: removing div, 5: removing a
+        int removeDivTags = 0, skipDivTagsToRemove = 0;
         while (std::getline(inFile, line))
         {
-            // Handle PHP blocks (multi-line)
-            if (line.find("<?php") != std::string::npos)
-                inPhpBlock = true;
-            if (inPhpBlock)
-            {
-                if (line.find("?>") != std::string::npos)
-                {
-                    inPhpBlock = false;
-                }
-                continue;
-            }
-
-            // Handle HTML comment blocks (multi-line)
-            if (line.find("<!--") != std::string::npos)
-                inHtmlCommentBlock = true;
-            if (inHtmlCommentBlock)
-            {
+            // process removing block terminal
+            switch (inBlock) {
+            case 1: // comment block
                 if (line.find("-->") != std::string::npos)
                 {
-                    inHtmlCommentBlock = false;
+                    line = line.substr(line.find("-->") + 3);
+                    inBlock = 0;
+                    if (line.length() > 0)
+                        break;
                 }
                 continue;
-            }
-
-            // Handle script blocks (multi-line)
-            if (line.find("<script") != std::string::npos)
-                inScriptBlock = true;
-            if (inScriptBlock)
-            {
+            case 2: // php block
+                if (line.find("?>") != std::string::npos)
+                {
+                    line = line.substr(line.find("?>") + 2);
+                    inBlock = 0;
+                    if (line.length() > 0)
+                        break;
+                }
+                continue;
+            case 3: // script block
                 if (line.find("</script>") != std::string::npos)
                 {
-                    inScriptBlock = false;
+                    line = line.substr(line.find("</script>") + 9);
+                    inBlock = 0;
+                    if (line.length() > 0)
+                        break;
                 }
+                continue;
+            case 4: // removing div
+                if (line.find("<div") != std::string::npos)
+                    skipDivTagsToRemove++;
+                if (line.find("</div>") != std::string::npos)
+                {
+                    if (skipDivTagsToRemove > 0)
+                        skipDivTagsToRemove--;
+                    else
+                        inBlock = 0;
+                }
+                continue;
+            case 5: // removing a
+                if (line.find("</a>") != std::string::npos)
+                    inBlock = 0;
                 continue;
             }
 
             // Remove unwanted divs
-            //static const std::regex bgDivRegex("<div class=\\\"bg.* ? \\\">.*?<div class=\\\"content\\\">(.*?)</div></div>", std::regex::dotall);
-            //line = std::regex_replace(line, bgDivRegex, "$1");
+            if (line.find("<div class=\"bg") != std::string::npos) {
+                removeDivTags ++;
+                std::getline(inFile, line);
+                if (line.find("<div class=\"content\"") != std::string::npos) {
+                    removeDivTags++;
+                    std::getline(inFile, line);
+                }
+            }
+            if ( removeDivTags > 0 ){
+                if (line.find("<div") != std::string::npos)
+                    skipDivTagsToRemove++;
+                if (line.find("</div>") != std::string::npos) {
+                    if (skipDivTagsToRemove > 0)
+                        skipDivTagsToRemove--;
+                    else {
+                        removeDivTags--;
+                        std::getline(inFile, line);
+                        continue;
+                    }
+                }
+            }
 
-            //// Remove animated classes and styles
-            //static const std::regex animatedClassRegex(" class=\\\"animated.* ? \\\"");
-            //line = std::regex_replace(line, animatedClassRegex, "");
+            // Remove animated classes and styles
+            if (line.find("class=\"") != std::string::npos) {
+                std::regex replaceRegex("animated");
+                line = std::regex_replace(line, replaceRegex, "");
+                replaceRegex = "slide-up";
+                line = std::regex_replace(line, replaceRegex, "");
+                replaceRegex = "slide-down";
+                line = std::regex_replace(line, replaceRegex, "");
+                replaceRegex = "slide-left";
+                line = std::regex_replace(line, replaceRegex, "");
+                replaceRegex = "slide-right";
+                line = std::regex_replace(line, replaceRegex, "");
+                replaceRegex = "zoom";
+                line = std::regex_replace(line, replaceRegex, "");
+            }
+            if (line.find("style=\"") != std::string::npos) {
+                std::regex replaceRegex(R"(--speed:\s[0-9]+(\.[0-9]+)?s;?)");
+                line = std::regex_replace(line, replaceRegex, "");
+            }
 
-            //static const std::regex styleRegex(" style=\\\".* ? \\\"");
-            //line = std::regex_replace(line, styleRegex, "");
+            // Replace "PRODUCT NAME" -> "Product Name
+            std::regex urlRegex("PRODUCT NAME");
+            line = std::regex_replace(line, urlRegex, productName);
 
+            // process removing block start
+            if (!inBlock) {
+                if (line.find("<!--") != std::string::npos) {
+                    size_t t = line.find("-->");
+                    if (t == std::string::npos) {
+                        line = line.substr(0, line.find("<!--"));
+                        inBlock = 1;
+                    }else
+                        line = line.substr(0, line.find("<!--")) + line.substr(t + 3);
+                }else if (line.find("<?php") != std::string::npos) {
+                    size_t t = line.find("?>");
+                    if (t == std::string::npos){
+                        line = line.substr(0, line.find("<?php"));
+                        inBlock = 2;
+                    }else
+                        line = line.substr(0, line.find("<?php")) + line.substr(t + 2);
+                }else if (line.find("<script") != std::string::npos) {
+                    size_t t = line.find("</script>");
+                    if (t == std::string::npos) {
+                        line = line.substr(0, line.find("<script"));
+                        inBlock = 3;
+                    }else
+                        line = line.substr(0, line.find("<script")) + line.substr(t + 9);
+                }else if (line.find("<div") != std::string::npos && line.find("id=\"noreseller\"") != std::string::npos) {
+                    inBlock = 4;
+                    line = line.substr(0, line.find("<div"));
+                }else if (line.find("<a") != std::string::npos && line.find("href=\"https://warriorplus.com/o2") != std::string::npos) {
+                    size_t t = line.find("</a>");
+                    if (t == std::string::npos) {
+                        line = line.substr(0, line.find("<a"));
+                        inBlock = 5;
+                    }
+                    else
+                        line = line.substr(0, line.find("<a")) + line.substr(t + 2);
+                }
+            }
             // Write modified line
-            outFile << line << "\n";
+            if (line.length() > 0)
+                outFile << line << "\n";
         }
 
         AddLog(hwnd, "Processed PHP file: " + filePath);
@@ -96,7 +178,8 @@ void ProcessPhpFile(const std::string& filePath, const std::string& htmlDir, HWN
 
 void ProcessEmailFile(const std::string& filePath, const std::string& htmlDir, HWND hwnd, const std::string& yourLink)
 {
-    std::string destFilePath = htmlDir + "\\emails\\" + fs::path(filePath).filename().string();
+    std::string file = fs::path(filePath).filename().string();
+    std::string destFilePath = htmlDir + "\\emails\\" + file.substr(file.find("broadcast"));
     fs::create_directories(htmlDir + "\\emails");
 
     std::ifstream inFile(filePath);
@@ -105,31 +188,31 @@ void ProcessEmailFile(const std::string& filePath, const std::string& htmlDir, H
     if (inFile && outFile)
     {
         std::string line;
-        bool removeSignature = false;
         while (std::getline(inFile, line))
         {
+            std::string lowerLine = line;
+            std::transform(lowerLine.begin(), lowerLine.end(), lowerLine.begin(), ::tolower);
             // Skip lines containing forbidden phrases
-            if (line.find("resell rights") != std::string::npos ||
-                line.find("re-sell rights") != std::string::npos ||
-                line.find("resale rights") != std::string::npos ||
-                line.find("resellable") != std::string::npos ||
-                line.find("licensing rights") != std::string::npos)
+            if (lowerLine.find("resell rights") != std::string::npos ||
+                lowerLine.find("re-sell rights") != std::string::npos ||
+                lowerLine.find("resale rights") != std::string::npos ||
+                lowerLine.find("resellable") != std::string::npos ||
+                lowerLine.find("licensing rights") != std::string::npos)
             {
                 continue;
             }
 
             // Replace links with "YOUR LINK"
-            std::regex urlRegex("https://www.supersalesmachine/.com/*");
-            line = std::regex_replace(line, urlRegex, yourLink);
+            std::regex urlRegex("https://www.supersalesmachine.com/[^\\s]*");
+            lowerLine = std::regex_replace(lowerLine, urlRegex, yourLink);
 
             // Remove signature and anything below it
-            if (line.find("Best regards") != std::string::npos)
+            if (lowerLine.find("best regards") != std::string::npos)
             {
-                removeSignature = true;
                 break;
             }
 
-            outFile << line << "\n";
+            outFile << lowerLine << "\n";
         }
 
         AddLog(hwnd, "Processed email: " + filePath);
@@ -193,7 +276,7 @@ void StartConversion(HWND hwnd, const std::string& phpDir, const std::string& te
         AddLog(hwnd, "Error: PHP directory does not exist or is not a directory.");
         return;
     }
-    // create new destination directory
+    // remove origin destination directory
     if (fs::exists(htmlDir))
     {
         try
@@ -207,6 +290,18 @@ void StartConversion(HWND hwnd, const std::string& phpDir, const std::string& te
             return;
         }
     }
+    // Copy template directory to html directory
+    try
+    {
+        fs::copy(templateDir, htmlDir, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+        AddLog(hwnd, "Copied template directory to template directory: " + htmlDir);
+    }
+    catch (const fs::filesystem_error& e)
+    {
+        AddLog(hwnd, "Error: Failed to copy template directory to HTML directory. " + std::string(e.what()));
+        return;
+    }
+    // create new destination directory
     try
     {
         fs::create_directories(htmlDir);
@@ -215,6 +310,17 @@ void StartConversion(HWND hwnd, const std::string& phpDir, const std::string& te
     catch (const fs::filesystem_error& e)
     {
         AddLog(hwnd, "Error: Failed to create HTML directory. " + std::string(e.what()));
+        return;
+    }
+    // Copy template directory to html directory
+    try
+    {
+        fs::copy(templateDir, htmlDir, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+        AddLog(hwnd, "Copied template directory to template directory: " + htmlDir);
+    }
+    catch (const fs::filesystem_error& e)
+    {
+        AddLog(hwnd, "Error: Failed to copy template directory to HTML directory. " + std::string(e.what()));
         return;
     }
 
