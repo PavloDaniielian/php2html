@@ -1,180 +1,211 @@
-// php2html.cpp : Defines the entry point for the application.
-//
+#include <windows.h>
+#include <commctrl.h>
+#include <string>
+#include <fstream>
+#include <iostream>
+#include <vector>
+#include "Resource.h"
+#include <shlobj.h> // For SHBrowseForFolder
 
-#include "framework.h"
-#include "php2html.h"
+#include "convert.h"
 
-#define MAX_LOADSTRING 100
+// Global variables
+HWND hProgressBar, hInputPHPDir, hInputTemplateDir, hInputHTMLDir, hProductName, hClassField, hReplaceDir, hCheckboxDelete, hCreateButton;
 
-// Global Variables:
-HINSTANCE hInst;                                // current instance
-WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
-WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
+// Function prototypes
+void CreateControls(HWND);
+std::string BrowseFolder(HWND);
+void ProcessFiles(const std::string&, const std::string&);
 
-// Forward declarations of functions included in this code module:
-ATOM                MyRegisterClass(HINSTANCE hInstance);
-BOOL                InitInstance(HINSTANCE, int);
-LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
-INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
-
-int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
-                     _In_opt_ HINSTANCE hPrevInstance,
-                     _In_ LPWSTR    lpCmdLine,
-                     _In_ int       nCmdShow)
+// Callback function to set the initial folder
+int CALLBACK BrowseCallbackProc(HWND hwnd, UINT uMsg, LPARAM lParam, LPARAM lpData)
 {
-    UNREFERENCED_PARAMETER(hPrevInstance);
-    UNREFERENCED_PARAMETER(lpCmdLine);
-
-    // TODO: Place code here.
-
-    // Initialize global strings
-    LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
-    LoadStringW(hInstance, IDC_PHP2HTML, szWindowClass, MAX_LOADSTRING);
-    MyRegisterClass(hInstance);
-
-    // Perform application initialization:
-    if (!InitInstance (hInstance, nCmdShow))
+    if (uMsg == BFFM_INITIALIZED && lpData)
     {
-        return FALSE;
-    }
-
-    HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_PHP2HTML));
-
-    MSG msg;
-
-    // Main message loop:
-    while (GetMessage(&msg, nullptr, 0, 0))
-    {
-        if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
-        {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-    }
-
-    return (int) msg.wParam;
-}
-
-
-
-//
-//  FUNCTION: MyRegisterClass()
-//
-//  PURPOSE: Registers the window class.
-//
-ATOM MyRegisterClass(HINSTANCE hInstance)
-{
-    WNDCLASSEXW wcex;
-
-    wcex.cbSize = sizeof(WNDCLASSEX);
-
-    wcex.style          = CS_HREDRAW | CS_VREDRAW;
-    wcex.lpfnWndProc    = WndProc;
-    wcex.cbClsExtra     = 0;
-    wcex.cbWndExtra     = 0;
-    wcex.hInstance      = hInstance;
-    wcex.hIcon          = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_PHP2HTML));
-    wcex.hCursor        = LoadCursor(nullptr, IDC_ARROW);
-    wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW+1);
-    wcex.lpszMenuName   = MAKEINTRESOURCEW(IDC_PHP2HTML);
-    wcex.lpszClassName  = szWindowClass;
-    wcex.hIconSm        = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_SMALL));
-
-    return RegisterClassExW(&wcex);
-}
-
-//
-//   FUNCTION: InitInstance(HINSTANCE, int)
-//
-//   PURPOSE: Saves instance handle and creates main window
-//
-//   COMMENTS:
-//
-//        In this function, we save the instance handle in a global variable and
-//        create and display the main program window.
-//
-BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
-{
-   hInst = hInstance; // Store instance handle in our global variable
-
-   HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
-
-   if (!hWnd)
-   {
-      return FALSE;
-   }
-
-   ShowWindow(hWnd, nCmdShow);
-   UpdateWindow(hWnd);
-
-   return TRUE;
-}
-
-//
-//  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
-//
-//  PURPOSE: Processes messages for the main window.
-//
-//  WM_COMMAND  - process the application menu
-//  WM_PAINT    - Paint the main window
-//  WM_DESTROY  - post a quit message and return
-//
-//
-LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    switch (message)
-    {
-    case WM_COMMAND:
-        {
-            int wmId = LOWORD(wParam);
-            // Parse the menu selections:
-            switch (wmId)
-            {
-            case IDM_ABOUT:
-                DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
-                break;
-            case IDM_EXIT:
-                DestroyWindow(hWnd);
-                break;
-            default:
-                return DefWindowProc(hWnd, message, wParam, lParam);
-            }
-        }
-        break;
-    case WM_PAINT:
-        {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hWnd, &ps);
-            // TODO: Add any drawing code that uses hdc here...
-            EndPaint(hWnd, &ps);
-        }
-        break;
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        break;
-    default:
-        return DefWindowProc(hWnd, message, wParam, lParam);
+        // Set the default directory
+        SendMessage(hwnd, BFFM_SETSELECTION, TRUE, lpData);
     }
     return 0;
 }
 
-// Message handler for about box.
-INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+std::string BrowseForFolder(HWND hwnd, const char* title, const std::string& defaultPath)
 {
-    UNREFERENCED_PARAMETER(lParam);
-    switch (message)
+    char path[MAX_PATH] = { 0 };
+
+    BROWSEINFO bi = { 0 };
+    bi.hwndOwner = hwnd;
+    bi.lpszTitle = title;
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_USENEWUI;
+    bi.lpfn = BrowseCallbackProc; // Set the callback function
+    bi.lParam = (LPARAM)defaultPath.c_str(); // Pass the default path to the callback
+
+    // Open the dialog
+    LPITEMIDLIST pidl = SHBrowseForFolder(&bi);
+    if (pidl != NULL)
     {
-    case WM_INITDIALOG:
-        return (INT_PTR)TRUE;
+        // Get the selected folder path
+        SHGetPathFromIDList(pidl, path);
+        CoTaskMemFree(pidl); // Free the memory allocated by SHBrowseForFolder
+        return std::string(path);
+    }
+
+    return ""; // Return empty string if canceled
+}
+
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg)
+    {
+    case WM_CREATE:
+        CreateControls(hwnd);
+        break;
 
     case WM_COMMAND:
-        if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
+        switch (LOWORD(wParam))
         {
-            EndDialog(hDlg, LOWORD(wParam));
-            return (INT_PTR)TRUE;
+        case 3: // Browse button for PHP Directory
+            {
+                char phpDir[MAX_PATH];
+                GetWindowText(hInputPHPDir, phpDir, MAX_PATH);
+                std::string selectedDir = BrowseForFolder(hwnd, "Select PHP Directory", phpDir);
+                if (!selectedDir.empty())
+                {
+                    SetWindowText(hInputPHPDir, selectedDir.c_str());
+                    std::string htmlDir = selectedDir + "\\_HTML RESELLERS";
+                    SetWindowText(hInputHTMLDir, htmlDir.c_str());
+                }
+            }
+            break;
+
+        case 11: // Browse button for template Directory
+            {
+                char templateDir[MAX_PATH];
+                GetWindowText(hInputTemplateDir, templateDir, MAX_PATH);
+                std::string selectedDir = BrowseForFolder(hwnd, "Select Template Directory", templateDir);
+                if (!selectedDir.empty())
+                {
+                    SetWindowText(hInputTemplateDir, selectedDir.c_str());
+                }
+            }
+            break;
+
+        case 4: // Browse button for HTML Directory
+            {
+                char htmlDir[MAX_PATH];
+                GetWindowText(hInputHTMLDir, htmlDir, MAX_PATH);
+                std::string selectedDir = BrowseForFolder(hwnd, "Select HTML Directory", htmlDir);
+                if (!selectedDir.empty())
+                {
+                    SetWindowText(hInputHTMLDir, selectedDir.c_str());
+                }
+            }
+            break;
+
+        case 1: // Create Site button
+            char phpDir[MAX_PATH], templateDir[MAX_PATH], htmlDir[MAX_PATH], productName[100], classesToKeep[100], replaceDir[MAX_PATH], yourLink[500];
+            GetWindowText(hInputPHPDir, phpDir, MAX_PATH);
+            GetWindowText(hInputTemplateDir, templateDir, MAX_PATH);
+            GetWindowText(hInputHTMLDir, htmlDir, MAX_PATH);
+            GetWindowText(hProductName, productName, 100);
+            GetWindowText(hClassField, classesToKeep, 100);
+            GetWindowText(hReplaceDir, replaceDir, MAX_PATH);
+            GetWindowText(GetDlgItem(hwnd, 6), yourLink, 500); // Get the value of Your Link
+
+            bool deleteUncompressedFiles = SendMessage(hCheckboxDelete, BM_GETCHECK, 0, 0) == BST_CHECKED;
+            SendMessage(hProgressBar, PBM_SETPOS, 0, 0);
+            SetDlgItemText(hwnd, 2, ""); // Clear the log box
+
+            StartConversion(hwnd, phpDir, templateDir, htmlDir, productName, classesToKeep, replaceDir, deleteUncompressedFiles, yourLink);
         }
         break;
+
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        break;
+
+    default:
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
-    return (INT_PTR)FALSE;
+    return 0;
+}
+
+int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+{
+    const char CLASS_NAME[] = "SiteConverter";
+
+    WNDCLASS wc = { 0 };
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = CLASS_NAME;
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW);
+    wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_PHP2HTML));
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+
+    RegisterClass(&wc);
+
+    HWND hwnd = CreateWindowEx(
+        0,
+        CLASS_NAME,
+        "PHP to HTML Site Converter",
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, 630, 690,
+        NULL, NULL, hInstance, NULL
+    );
+
+    ShowWindow(hwnd, nCmdShow);
+
+    MSG msg = { 0 };
+    while (GetMessage(&msg, NULL, 0, 0))
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    return 0;
+}
+
+void CreateControls(HWND hwnd)
+{
+    CreateWindow("STATIC", "PHP Directory:", WS_VISIBLE | WS_CHILD, 20, 20, 150, 20, hwnd, NULL, NULL, NULL);
+    hInputPHPDir = CreateWindow("EDIT", "D:\\Work\\Upwork\\20250127\\converting", WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 20, 400, 20, hwnd, NULL, NULL, NULL);
+    CreateWindow("BUTTON", "...", WS_VISIBLE | WS_CHILD, 570, 20, 30, 20, hwnd, (HMENU)3, NULL, NULL); // Browse button for PHP directory
+
+    CreateWindow("STATIC", "Template Directory:", WS_VISIBLE | WS_CHILD, 20, 60, 150, 20, hwnd, NULL, NULL, NULL);
+    hInputTemplateDir = CreateWindow("EDIT", "D:\\Work\\Upwork\\20250127\\template", WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 60, 400, 20, hwnd, NULL, NULL, NULL);
+    CreateWindow("BUTTON", "...", WS_VISIBLE | WS_CHILD, 570, 60, 30, 20, hwnd, (HMENU)11, NULL, NULL); // Browse button for PHP directory
+
+    CreateWindow("STATIC", "HTML Directory:", WS_VISIBLE | WS_CHILD, 20, 100, 150, 20, hwnd, NULL, NULL, NULL);
+    hInputHTMLDir = CreateWindow("EDIT", "D:\\Work\\Upwork\\20250127\\converting\\_HTML RESELLERS", WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 100, 400, 20, hwnd, NULL, NULL, NULL);
+    CreateWindow("BUTTON", "...", WS_VISIBLE | WS_CHILD, 570, 100, 30, 20, hwnd, (HMENU)4, NULL, NULL); // Browse button for HTML directory
+
+    CreateWindow("STATIC", "Product Name:", WS_VISIBLE | WS_CHILD, 20, 140, 150, 20, hwnd, NULL, NULL, NULL);
+    hProductName = CreateWindow("EDIT", "Product Name", WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 140, 400, 20, hwnd, NULL, NULL, NULL);
+
+    CreateWindow("STATIC", "Classes to Keep:", WS_VISIBLE | WS_CHILD, 20, 180, 150, 20, hwnd, NULL, NULL, NULL);
+    hClassField = CreateWindow("EDIT", "", WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 180, 400, 20, hwnd, NULL, NULL, NULL);
+
+    CreateWindow("STATIC", "Replace Directory:", WS_VISIBLE | WS_CHILD, 20, 220, 150, 20, hwnd, NULL, NULL, NULL);
+    hReplaceDir = CreateWindow("EDIT", "DIR", WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 220, 400, 20, hwnd, NULL, NULL, NULL);
+
+    CreateWindow("STATIC", "Your Link:", WS_VISIBLE | WS_CHILD, 20, 260, 150, 20, hwnd, NULL, NULL, NULL);
+    HWND hYourLink = CreateWindow("EDIT", "Your Link", WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 260, 400, 20, hwnd, (HMENU)6, NULL, NULL);
+
+    hCheckboxDelete = CreateWindow("BUTTON", "Delete Uncompressed Files", WS_VISIBLE | WS_CHILD | BS_AUTOCHECKBOX, 20, 300, 200, 20, hwnd, NULL, NULL, NULL);
+
+    hCreateButton = CreateWindow("BUTTON", "Create Site", WS_VISIBLE | WS_CHILD, 250, 340, 100, 30, hwnd, (HMENU)1, NULL, NULL);
+
+    hProgressBar = CreateWindow(PROGRESS_CLASS, NULL, WS_VISIBLE | WS_CHILD, 20, 390, 570, 20, hwnd, (HMENU)5, NULL, NULL);
+    SendMessage(hProgressBar, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
+
+    // Add a multiline EDIT control for the event log
+    CreateWindow(
+        "EDIT",
+        "", // No initial text
+        WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | WS_VSCROLL | ES_READONLY,
+        20, 430, 570, 200,
+        hwnd,
+        (HMENU)2, // Assign an ID to the log box
+        NULL,
+        NULL
+    );
 }
