@@ -13,10 +13,12 @@
 #include "convert.h"
 
 // Global variables
-HWND hProgressBar, hInputPHPDir, hInputTemplateDir, hInputHTMLDir, hProductName, hClassField, hReplaceDir, hCheckboxDelete, hCreateButton;
+HWND hProgressBar, hInputPHPDir, hInputTemplateDir, hInputHTMLDir, hProductName, hClassField, hReplaceDir, hCheckboxDelete, hCreateButton, hYourLink;
+#define MY_MAX_PATH 1000
 
 // Function prototypes
 void CreateControls(HWND);
+void ResizeControls(HWND hwnd, int w, int h);
 std::string BrowseFolder(HWND);
 void ProcessFiles(const std::string&, const std::string&);
 
@@ -46,7 +48,7 @@ std::map<std::string, std::string> LoadConfig(const std::string& filePath)
         {"productName", "HealthSupplementNewsletters"},
         {"classesToKeep", "staatliches"},
         {"replaceDir", "health"},
-        {"yourLink", "https://YourLink"},
+        {"yourLink", "YOUR LINK"},
         {"deleteUncompressedFiles", "false"}
     };
 
@@ -73,39 +75,61 @@ std::map<std::string, std::string> LoadConfig(const std::string& filePath)
     return config;
 }
 
-// Callback function to set the initial folder
-int CALLBACK BrowseCallbackProc(HWND hwnd, UINT uMsg, LPARAM lParam, LPARAM lpData)
+// Function to open a modern folder dialog with default directory
+std::string OpenFolderDialog(HWND hwnd, const std::string& title, const std::string& defaultPath)
 {
-    if (uMsg == BFFM_INITIALIZED && lpData)
+    std::string selectedPath;
+    IFileDialog* pFileDialog = nullptr;
+
+    HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_IFileDialog, reinterpret_cast<void**>(&pFileDialog));
+    if (FAILED(hr)) return ""; // Return empty string if failed
+
+    // Set folder selection mode
+    DWORD dwOptions;
+    pFileDialog->GetOptions(&dwOptions);
+    pFileDialog->SetOptions(dwOptions | FOS_PICKFOLDERS);
+
+    // Set dialog title
+    pFileDialog->SetTitle(std::wstring(title.begin(), title.end()).c_str());
+
+    // Set default directory if provided
+    if (!defaultPath.empty())
     {
-        // Set the default directory
-        SendMessage(hwnd, BFFM_SETSELECTION, TRUE, lpData);
-    }
-    return 0;
-}
-
-std::string BrowseForFolder(HWND hwnd, const char* title, const std::string& defaultPath)
-{
-    char path[MAX_PATH] = { 0 };
-
-    BROWSEINFO bi = { 0 };
-    bi.hwndOwner = hwnd;
-    bi.lpszTitle = title;
-    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_USENEWUI;
-    bi.lpfn = BrowseCallbackProc; // Set the callback function
-    bi.lParam = (LPARAM)defaultPath.c_str(); // Pass the default path to the callback
-
-    // Open the dialog
-    LPITEMIDLIST pidl = SHBrowseForFolder(&bi);
-    if (pidl != NULL)
-    {
-        // Get the selected folder path
-        SHGetPathFromIDList(pidl, path);
-        CoTaskMemFree(pidl); // Free the memory allocated by SHBrowseForFolder
-        return std::string(path);
+        IShellItem* pDefaultFolder = nullptr;
+        std::wstring wDefaultPath(defaultPath.begin(), defaultPath.end());
+        hr = SHCreateItemFromParsingName(wDefaultPath.c_str(), NULL, IID_PPV_ARGS(&pDefaultFolder));
+        if (SUCCEEDED(hr))
+        {
+            pFileDialog->SetFolder(pDefaultFolder);
+            pDefaultFolder->Release();
+        }
     }
 
-    return ""; // Return empty string if canceled
+    // Show dialog
+    hr = pFileDialog->Show(hwnd);
+    if (SUCCEEDED(hr))
+    {
+        // Get the selected folder
+        IShellItem* pItem = nullptr;
+        hr = pFileDialog->GetResult(&pItem);
+        if (SUCCEEDED(hr))
+        {
+            PWSTR pszPath;
+            hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszPath);
+            if (SUCCEEDED(hr))
+            {
+                //selectedPath = std::string(std::wstring(pszPath).begin(), std::wstring(pszPath).end());
+                char s[MY_MAX_PATH];
+                WideCharToMultiByte(CP_ACP, 0, pszPath, MY_MAX_PATH, s, MY_MAX_PATH, 0, 0);
+                selectedPath = std::string(s);
+                CoTaskMemFree(pszPath);
+            }
+            pItem->Release();
+        }
+    }
+
+    pFileDialog->Release();
+    return selectedPath;
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -115,15 +139,18 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     case WM_CREATE:
         CreateControls(hwnd);
         break;
+    case WM_SIZE:
+        ResizeControls(hwnd, LOWORD(lParam), HIWORD(lParam));
+        break;
 
     case WM_COMMAND:
         switch (LOWORD(wParam))
         {
         case 3: // Browse button for PHP Directory
             {
-                char phpDir[MAX_PATH];
-                GetWindowText(hInputPHPDir, phpDir, MAX_PATH);
-                std::string selectedDir = BrowseForFolder(hwnd, "Select PHP Directory", phpDir);
+                char phpDir[MY_MAX_PATH];
+                GetWindowText(hInputPHPDir, phpDir, MY_MAX_PATH);
+                std::string selectedDir = OpenFolderDialog(hwnd, "Select PHP Directory", phpDir);
                 if (!selectedDir.empty())
                 {
                     SetWindowText(hInputPHPDir, selectedDir.c_str());
@@ -135,9 +162,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
         case 11: // Browse button for template Directory
             {
-                char templateDir[MAX_PATH];
-                GetWindowText(hInputTemplateDir, templateDir, MAX_PATH);
-                std::string selectedDir = BrowseForFolder(hwnd, "Select Template Directory", templateDir);
+                char templateDir[MY_MAX_PATH];
+                GetWindowText(hInputTemplateDir, templateDir, MY_MAX_PATH);
+                std::string selectedDir = OpenFolderDialog(hwnd, "Select Template Directory", templateDir);
                 if (!selectedDir.empty())
                 {
                     SetWindowText(hInputTemplateDir, selectedDir.c_str());
@@ -147,9 +174,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
         case 4: // Browse button for HTML Directory
             {
-                char htmlDir[MAX_PATH];
-                GetWindowText(hInputHTMLDir, htmlDir, MAX_PATH);
-                std::string selectedDir = BrowseForFolder(hwnd, "Select HTML Directory", htmlDir);
+                char htmlDir[MY_MAX_PATH];
+                GetWindowText(hInputHTMLDir, htmlDir, MY_MAX_PATH);
+                std::string selectedDir = OpenFolderDialog(hwnd, "Select HTML Directory", htmlDir);
                 if (!selectedDir.empty())
                 {
                     SetWindowText(hInputHTMLDir, selectedDir.c_str());
@@ -159,14 +186,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
         case 1: // Create Site button
             {
-                char phpDir[MAX_PATH], templateDir[MAX_PATH], htmlDir[MAX_PATH], productName[100], classesToKeep[100], replaceDir[MAX_PATH], yourLink[500];
-                GetWindowText(hInputPHPDir, phpDir, MAX_PATH);
-                GetWindowText(hInputTemplateDir, templateDir, MAX_PATH);
-                GetWindowText(hInputHTMLDir, htmlDir, MAX_PATH);
+                char phpDir[MY_MAX_PATH], templateDir[MY_MAX_PATH], htmlDir[MY_MAX_PATH], productName[100], classesToKeep[100], replaceDir[MY_MAX_PATH], yourLink[500];
+                GetWindowText(hInputPHPDir, phpDir, MY_MAX_PATH);
+                GetWindowText(hInputTemplateDir, templateDir, MY_MAX_PATH);
+                GetWindowText(hInputHTMLDir, htmlDir, MY_MAX_PATH);
                 GetWindowText(hProductName, productName, 100);
                 GetWindowText(hClassField, classesToKeep, 100);
-                GetWindowText(hReplaceDir, replaceDir, MAX_PATH);
-                GetWindowText(GetDlgItem(hwnd, 6), yourLink, 500); // Get the value of Your Link
+                GetWindowText(hReplaceDir, replaceDir, MY_MAX_PATH);
+                GetWindowText(hYourLink, yourLink, 500); // Get the value of Your Link
 
                 bool deleteUncompressedFiles = SendMessage(hCheckboxDelete, BM_GETCHECK, 0, 0) == BST_CHECKED;
                 SendMessage(hProgressBar, PBM_SETPOS, 0, 0);
@@ -219,9 +246,11 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         CLASS_NAME,
         "PHP to HTML Site Converter",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 630, 690,
+        CW_USEDEFAULT, CW_USEDEFAULT, 1000, 700,
         NULL, NULL, hInstance, NULL
     );
+
+    CoInitialize(NULL);
 
     ShowWindow(hwnd, nCmdShow);
 
@@ -269,8 +298,8 @@ void CreateControls(HWND hwnd)
     CreateWindow("STATIC", "Replace Directory:", WS_VISIBLE | WS_CHILD, 20, 220, 150, 20, hwnd, NULL, NULL, NULL);
     hReplaceDir = CreateWindow("EDIT", replaceDir.c_str(), WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 220, 400, 20, hwnd, NULL, NULL, NULL);
 
-    CreateWindow("STATIC", "Your Link:", WS_VISIBLE | WS_CHILD, 20, 260, 150, 20, hwnd, NULL, NULL, NULL);
-    HWND hYourLink = CreateWindow("EDIT", yourLink.c_str(), WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 260, 400, 20, hwnd, (HMENU)6, NULL, NULL);
+    CreateWindow("STATIC", "Email Links:", WS_VISIBLE | WS_CHILD, 20, 260, 150, 20, hwnd, NULL, NULL, NULL);
+    hYourLink = CreateWindow("EDIT", yourLink.c_str(), WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 260, 400, 20, hwnd, NULL, NULL, NULL);
 
     hCheckboxDelete = CreateWindow("BUTTON", "Delete Uncompressed Files", WS_VISIBLE | WS_CHILD | BS_AUTOCHECKBOX, 20, 300, 200, 20, hwnd, NULL, NULL, NULL);
     if (deleteUncompressedFiles) SendMessage(hCheckboxDelete, BM_SETCHECK, BST_CHECKED, 0);
@@ -281,4 +310,26 @@ void CreateControls(HWND hwnd)
     SendMessage(hProgressBar, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
 
     CreateWindow("EDIT", "", WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | WS_VSCROLL | ES_READONLY, 20, 430, 570, 200, hwnd, (HMENU)2, NULL, NULL);
+}
+
+void ResizeControls(HWND hwnd, int w, int h)
+{
+    SetWindowPos(hInputPHPDir, NULL, 160, 20, w-160 - 20 - 30, 20, SWP_NOZORDER);
+    SetWindowPos(GetDlgItem(hwnd, 3), NULL, w - 15 -30, 20, 30, 20, SWP_NOZORDER);
+
+    SetWindowPos(hInputTemplateDir, NULL, 160, 60, w - 160 - 20 - 30, 20, SWP_NOZORDER);
+    SetWindowPos(GetDlgItem(hwnd, 11), NULL, w - 15 - 30, 60, 30, 20, SWP_NOZORDER);
+
+    SetWindowPos(hInputHTMLDir, NULL, 160, 100, w - 160 - 20 - 30, 20, SWP_NOZORDER);
+    SetWindowPos(GetDlgItem(hwnd, 4), NULL, w - 15 - 30, 100, 30, 20, SWP_NOZORDER);
+
+    SetWindowPos(hProductName, NULL, 160, 140, w - 160 - 15, 20, SWP_NOZORDER);
+    SetWindowPos(hClassField, NULL, 160, 180, w - 160 - 15, 20, SWP_NOZORDER);
+    SetWindowPos(hReplaceDir, NULL, 160, 220, w - 160 - 15, 20, SWP_NOZORDER);
+    SetWindowPos(hYourLink, NULL, 160, 260, w - 160 - 15, 20, SWP_NOZORDER);
+
+    SetWindowPos(hCreateButton, NULL, (w-200)/2, 340, 200, 30, SWP_NOZORDER);
+
+    SetWindowPos(hProgressBar, NULL, 20, 390, w - 20*2, 20, SWP_NOZORDER);
+    SetWindowPos(GetDlgItem(hwnd, 2), NULL, 20, 430, w - 20*2, h > 550 ? (h-450) : 100, SWP_NOZORDER);
 }
