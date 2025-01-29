@@ -8,6 +8,12 @@
 
 namespace fs = std::filesystem;
 
+#define PROGRESS_STEP_start     2
+#define PROGRESS_STEP_process   40
+#define PROGRESS_DURING_process   (PROGRESS_STEP_process-PROGRESS_STEP_start)
+#define PROGRESS_STEP_zip       98
+#define PROGRESS_DURING_zip       (PROGRESS_STEP_zip-PROGRESS_STEP_process)
+
 std::string trim(std::string s) {
     // Trim leading whitespace
     s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
@@ -178,6 +184,10 @@ void ProcessPhpFile(const std::string& filePath, const std::string& newFilePath,
                 }
             } while (removedOnce);
 
+            // Remove .css? line
+            if (line.find(".css?") != std::string::npos)
+                continue;
+
             // Remove unwanted divs
             if (line.find("<div class=\"bg") != std::string::npos) {
                 removeDivTags ++;
@@ -247,8 +257,11 @@ void ProcessPhpFile(const std::string& filePath, const std::string& newFilePath,
 
 void ProcessEmailFile(const std::string& filePath, const std::string& newFilePath, HWND hwnd, const std::string& yourLink)
 {
+    std::string tempFilePath = newFilePath + "_temp";
+    CopyFile(newFilePath.c_str(), tempFilePath.c_str(), FALSE);
+
     std::ifstream inFile(filePath);
-    std::ofstream outFile(newFilePath);
+    std::ofstream outFile(newFilePath); // Open in append mode
 
     if (inFile && outFile)
     {
@@ -277,20 +290,32 @@ void ProcessEmailFile(const std::string& filePath, const std::string& newFilePat
                 break;
             }
 
-            outFile << lowerLine << "\n";
+            outFile << line << "\n";
         }
+        inFile.close();
+
+        // Append temp content of newFilePath
+        std::ifstream tempFile(tempFilePath);
+        if (tempFile)
+        {
+            while (std::getline(tempFile, line))
+                outFile << line << "\n";
+            tempFile.close();
+            DeleteFile(tempFilePath.c_str());
+        }
+        outFile.close();
 
         AddLog(hwnd, "Processed email: " + filePath);
     }
 }
 
-void ProcessImageFile(const std::string& filePath, const std::string& newFilePath, HWND hwnd)
+void ProcessCopyingFile(const std::string& filePath, const std::string& newFilePath, HWND hwnd)
 {
     std::string fileName = fs::path(filePath).filename().string();
     if (fileName.find("_") != 0 && fileName.find("-") != 0 && !fileName.ends_with("-"))
     {
         fs::copy(filePath, newFilePath, fs::copy_options::overwrite_existing);
-        AddLog(hwnd, "Copied image: " + fileName);
+        AddLog(hwnd, "Copied file: " + fileName);
     }
 }
 
@@ -314,7 +339,10 @@ void ProcessDirectory(const std::string& directory, const std::string& htmlDir, 
             std::string filePath = entry.path().string();
             std::string extension = entry.path().extension().string();
 
-            if (extension == ".php")
+            if (filePath.find("\\images", directory.length()-7) != std::string::npos) {
+                ProcessCopyingFile(filePath, newFilePath, hwnd);
+            }
+            else if (extension == ".php")
             {
                 if (newFile == "dl.php") {
                     newFilePath = htmlDir + "\\thankyou.html";
@@ -338,13 +366,12 @@ void ProcessDirectory(const std::string& directory, const std::string& htmlDir, 
                 fs::create_directories(fs::path(newFilePath).parent_path());
                 ProcessEmailFile(filePath, newFilePath, hwnd, yourLink);
             }
-            else if (extension == ".jpg" || extension == ".png")
-            {
-                ProcessImageFile(filePath, newFilePath, hwnd);
-            }
+
+            if ( fs::exists(newFilePath) && fs::file_size(newFilePath) == 0)
+                DeleteFile(newFilePath.c_str());
 
             gnCurFile++;
-            UpdateProgressBar(hwnd, 5 + ((float)gnCurFile / gnAllFilesNum) * 50 );
+            UpdateProgressBar(hwnd, PROGRESS_STEP_start + ((float)gnCurFile / gnAllFilesNum) * PROGRESS_DURING_process);
         }
     }
 }
@@ -469,7 +496,7 @@ void CompressDirectory(const std::string& dirPath, std::ofstream& zipFile, std::
         else if (entry.is_regular_file())
         {
             gnCurFile++;
-            UpdateProgressBar(hwnd, 55 + ((float)gnCurFile / gnAllFilesNum) * 43);
+            UpdateProgressBar(hwnd, PROGRESS_STEP_process + ((float)gnCurFile / gnAllFilesNum) * PROGRESS_DURING_zip);
 
             std::ifstream inputFile(entry.path().string(), std::ios::binary);
             if (!inputFile.is_open())
@@ -650,11 +677,11 @@ void StartConversion(HWND hwnd, const std::string& phpDir, const std::string& te
 
     gnAllFilesNum = getFilesNum(phpDir);
 
-    UpdateProgressBar(hwnd, 5);
+    UpdateProgressBar(hwnd, PROGRESS_STEP_start);
 
     gnCurFile = 0;
     ProcessDirectory(phpDir, htmlDir, hwnd, productName, classesToKeep, replaceDir, yourLink);
-    UpdateProgressBar(hwnd, 55);
+    UpdateProgressBar(hwnd, PROGRESS_STEP_process);
 
     // zip up
     // Files to zip
