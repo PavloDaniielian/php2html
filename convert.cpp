@@ -68,15 +68,28 @@ int getFilesNumInVector(std::vector<std::string> filesToZip) {
 void ProcessPhpFile(const std::string& filePath, const std::string& newFilePath, int dl, HWND hwnd,
     const std::string& productName, const std::string& classesToKeep, const std::string& replaceDir)
 {
+    std::string tempFilePath = newFilePath + "_temp";
+    bool bInsert = CopyFile(newFilePath.c_str(), tempFilePath.c_str(), FALSE);
+    std::ifstream tempFile(tempFilePath);
+
     std::ifstream inFile(filePath);
     std::ofstream outFile(newFilePath);
 
     if (inFile && outFile)
     {
         std::string line, prefix;
+
+        // insert head part
+        if (bInsert) {
+            while (std::getline(tempFile, line) && line.find(STR_PHP_CONTENT_start) == std::string::npos)
+                outFile << line << "\n";
+            while (std::getline(tempFile, line) && line.find(STR_PHP_CONTENT_end) == std::string::npos);
+            while (std::getline(inFile, line) && line.find(STR_PHP_CONTENT_start) == std::string::npos);
+        }
+
         int removeDivTags = 0, skipDivTagsToRemove = 0;
         int oto = 0;
-        while (std::getline(inFile, line))
+        while (std::getline(inFile, line) && (!bInsert || line.find(STR_PHP_CONTENT_end) == std::string::npos) )
         {
             size_t t = std::string::npos, t1, t2;
             bool removedOnce;
@@ -259,6 +272,16 @@ void ProcessPhpFile(const std::string& filePath, const std::string& newFilePath,
             if ( trim(line).length() > 0 )
                 outFile << line << "\n";
         }
+        inFile.close();
+
+        // insert foot part
+        if (bInsert) {
+            while (std::getline(tempFile, line) )
+                outFile << line << "\n";
+            tempFile.close();
+            DeleteFile(tempFilePath.c_str());
+        }
+        outFile.close();
 
         AddLog(hwnd, "Processed PHP file: " + filePath);
     }
