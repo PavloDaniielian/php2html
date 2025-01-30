@@ -1,17 +1,11 @@
 #include "convert.h"
-#include <iostream>
-#include <filesystem>
-#include <fstream>
-#include <regex>
-#include <commctrl.h>
 #include "include/zlib.h"
 
-namespace fs = std::filesystem;
 
 #define PROGRESS_STEP_start     2
-#define PROGRESS_STEP_process   40
+#define PROGRESS_STEP_process   30
 #define PROGRESS_DURING_process   (PROGRESS_STEP_process-PROGRESS_STEP_start)
-#define PROGRESS_STEP_zip       98
+#define PROGRESS_STEP_zip       100
 #define PROGRESS_DURING_zip       (PROGRESS_STEP_zip-PROGRESS_STEP_process)
 
 std::string trim(std::string s) {
@@ -49,6 +43,21 @@ int getFilesNum(const std::string& dir) {
     // Iterate through the directory recursively
     for (const auto& entry : fs::recursive_directory_iterator(dir)) {
         if (entry.is_regular_file()) {
+            fileCount++;
+        }
+    }
+    return fileCount;
+}
+int getFilesNumInVector(std::vector<std::string> filesToZip) {
+    int fileCount = 0;
+    for (const auto& file : filesToZip)
+    {
+        if (fs::is_directory(file))
+        {
+            fileCount += getFilesNum(file);
+        }
+        else if (fs::exists(file))
+        {
             fileCount++;
         }
     }
@@ -280,15 +289,13 @@ void ProcessEmailFile(const std::string& filePath, const std::string& newFilePat
                 continue;
             }
 
-            // Replace links with "YOUR LINK"
-            std::regex urlRegex("https://www.supersalesmachine.com/[^\\s]*");
-            lowerLine = std::regex_replace(lowerLine, urlRegex, yourLink);
-
             // Remove signature and anything below it
             if (lowerLine.find("best regards") != std::string::npos)
-            {
                 break;
-            }
+
+            // Replace links with "YOUR LINK"
+            std::regex urlRegex("https://www.supersalesmachine.com/[^\\s]*");
+            line = std::regex_replace(line, urlRegex, yourLink);
 
             outFile << line << "\n";
         }
@@ -358,13 +365,6 @@ void ProcessDirectory(const std::string& directory, const std::string& htmlDir, 
                     newFilePath = newFilePath.substr(0, newFilePath.find_last_of('.')) + ".html";
                     ProcessPhpFile(filePath, newFilePath, -1, hwnd, productName, classesToKeep, replaceDir);
                 }
-            }
-            else if (filePath.find("broadcast") != std::string::npos)
-            {
-                std::string file = fs::path(filePath).filename().string();
-                newFilePath = htmlDir + "\\emails\\" + file.substr(file.find("broadcast"));
-                fs::create_directories(fs::path(newFilePath).parent_path());
-                ProcessEmailFile(filePath, newFilePath, hwnd, yourLink);
             }
 
             if ( fs::exists(newFilePath) && fs::file_size(newFilePath) == 0)
@@ -476,7 +476,7 @@ void WriteCentralDirectory(std::ofstream& zipFile, const std::vector<CentralDire
 
 
 // Recursively compress a directory and its contents
-void CompressDirectory(const std::string& dirPath, std::ofstream& zipFile, std::vector<CentralDirectoryEntry>& centralDirectory, uint32_t& localHeaderOffset, HWND hwnd, const std::string& basePath)
+void CompressDirectory(std::string zipFileName, const std::string& dirPath, std::ofstream& zipFile, std::vector<CentralDirectoryEntry>& centralDirectory, uint32_t& localHeaderOffset, HWND hwnd, const std::string& basePath)
 {
     for (const auto& entry : fs::directory_iterator(dirPath))
     {
@@ -488,10 +488,10 @@ void CompressDirectory(const std::string& dirPath, std::ofstream& zipFile, std::
             centralDirectory.push_back({ relativePath, 0, 0, 0, localHeaderOffset });
             localHeaderOffset += 30 + relativePath.size();
 
-            AddLog(hwnd, "Added directory: " + relativePath);
+            //AddLog(hwnd, zipPath + ": " + "Added directory: " + relativePath);
 
             // Recursively process the directory
-            CompressDirectory(entry.path().string(), zipFile, centralDirectory, localHeaderOffset, hwnd, relativePath);
+            CompressDirectory(zipFileName, entry.path().string(), zipFile, centralDirectory, localHeaderOffset, hwnd, relativePath);
         }
         else if (entry.is_regular_file())
         {
@@ -501,7 +501,7 @@ void CompressDirectory(const std::string& dirPath, std::ofstream& zipFile, std::
             std::ifstream inputFile(entry.path().string(), std::ios::binary);
             if (!inputFile.is_open())
             {
-                AddLog(hwnd, "Failed to open file: " + entry.path().string());
+                AddLog(hwnd, zipFileName + ": " + "Failed to open file: " + entry.path().string());
                 continue;
             }
 
@@ -515,7 +515,7 @@ void CompressDirectory(const std::string& dirPath, std::ofstream& zipFile, std::
             int result = compress(compressedData.data(), &compressedSize, reinterpret_cast<const Bytef*>(sourceData.data()), sourceData.size());
             if (result != Z_OK)
             {
-                AddLog(hwnd, "Compression failed for file: " + entry.path().string());
+                AddLog(hwnd, zipFileName + ": " + "Compression failed for file: " + entry.path().string());
                 continue;
             }
 
@@ -525,7 +525,7 @@ void CompressDirectory(const std::string& dirPath, std::ofstream& zipFile, std::
             centralDirectory.push_back({ relativePath, crc, static_cast<uint32_t>(compressedSize), static_cast<uint32_t>(sourceData.size()), localHeaderOffset });
             localHeaderOffset += 30 + relativePath.size() + compressedSize;
 
-            AddLog(hwnd, "Added file: " + relativePath);
+            AddLog(hwnd, zipFileName + ": " + "Added file: " + relativePath);
         }
     }
 }
@@ -533,6 +533,8 @@ void CompressDirectory(const std::string& dirPath, std::ofstream& zipFile, std::
 // Updated CreateZip Function
 void CreateZip(const std::string& zipPath, const std::vector<std::string>& filesToZip, HWND hwnd)
 {
+    std::string zipFileName = zipPath.substr(zipPath.find_last_of("\\") + 1);
+
     AddLog(hwnd, "Creating ZIP archive: " + zipPath);
 
     std::ofstream zipFile(zipPath, std::ios::binary);
@@ -549,15 +551,15 @@ void CreateZip(const std::string& zipPath, const std::vector<std::string>& files
     {
         if (fs::is_directory(file))
         {
-            AddLog(hwnd, "Compressing directory: " + file);
-            CompressDirectory(file, zipFile, centralDirectory, localHeaderOffset, hwnd, fs::path(file).filename().string() + "/");
+            AddLog(hwnd, zipFileName + ": " + "Compressing directory: " + file);
+            CompressDirectory(zipFileName, file, zipFile, centralDirectory, localHeaderOffset, hwnd, fs::path(file).filename().string() + "/");
         }
         else if (fs::exists(file))
         {
             std::ifstream inputFile(file, std::ios::binary);
             if (!inputFile.is_open())
             {
-                AddLog(hwnd, "Failed to open file: " + file);
+                AddLog(hwnd, zipFileName + ": " + "Failed to open file: " + file);
                 continue;
             }
 
@@ -571,7 +573,7 @@ void CreateZip(const std::string& zipPath, const std::vector<std::string>& files
             int result = compress(compressedData.data(), &compressedSize, reinterpret_cast<const Bytef*>(sourceData.data()), sourceData.size());
             if (result != Z_OK)
             {
-                AddLog(hwnd, "Compression failed for file: " + file);
+                AddLog(hwnd, zipFileName + ": " + "Compression failed for file: " + file);
                 continue;
             }
 
@@ -582,11 +584,11 @@ void CreateZip(const std::string& zipPath, const std::vector<std::string>& files
             centralDirectory.push_back({ fileName, crc, static_cast<uint32_t>(compressedSize), static_cast<uint32_t>(sourceData.size()), localHeaderOffset });
             localHeaderOffset += 30 + fileName.size() + compressedSize;
 
-            AddLog(hwnd, "Added file: " + fileName);
+            AddLog(hwnd, zipFileName + ": " + "Added file: " + fileName);
         }
         else
         {
-            AddLog(hwnd, "File or directory not found: " + file);
+            AddLog(hwnd, zipFileName + ": " + "File or directory not found: " + file);
         }
     }
 
@@ -617,7 +619,7 @@ void DeleteUncompressedFiles(const std::string& dir) {
 
 // Main StartConversion function with progress bar integration
 void StartConversion(HWND hwnd, const std::string& phpDir, const std::string& templateDir, const std::string& htmlDir, const std::string& productName,
-    const std::string& classesToKeep, const std::string& replaceDir, bool deleteUncompressedFiles, const std::string& yourLink)
+    const std::string& classesToKeep, const std::string& replaceDir, std::map<std::string, std::string>  emailMap, const std::string& yourLink, bool deleteUncompressedFiles)
 {
     AddLog(hwnd, "Starting conversion process...");
 
@@ -680,12 +682,24 @@ void StartConversion(HWND hwnd, const std::string& phpDir, const std::string& te
     UpdateProgressBar(hwnd, PROGRESS_STEP_start);
 
     gnCurFile = 0;
+    // process emails
+    for (const auto& email : emailMap)
+    {
+        std::string src = phpDir + "\\" + email.first;
+        std::string dst = htmlDir + "\\emails\\" + email.second;
+        fs::create_directories(fs::path(dst).parent_path());
+        ProcessEmailFile(src, dst, hwnd, yourLink);
+        gnCurFile++;
+        UpdateProgressBar(hwnd, PROGRESS_STEP_start + ((float)gnCurFile / gnAllFilesNum) * PROGRESS_DURING_process);
+    }
+
+    // process other files
     ProcessDirectory(phpDir, htmlDir, hwnd, productName, classesToKeep, replaceDir, yourLink);
     UpdateProgressBar(hwnd, PROGRESS_STEP_process);
 
     // zip up
     // Files to zip
-    std::vector<std::string> filesToZip = {
+    std::vector<std::string> filesToZipBase = {
         htmlDir + "\\disclaimer.html",
         htmlDir + "\\emails",
         htmlDir + "\\files",
@@ -696,31 +710,71 @@ void StartConversion(HWND hwnd, const std::string& phpDir, const std::string& te
         htmlDir + "\\terms.html",
         htmlDir + "\\thankyou.html",
         htmlDir + "\\thankyou_signup.html",
+        htmlDir + "\\affiliates",
+        htmlDir + "\\affiliates.html",
+        htmlDir + "\\jv",
+        htmlDir + "\\jv.html",
     };
-    std::string zipFile_sufix = "";
+    std::vector<std::string> filesToZip, filesToZip1, filesToZip2, filesToZip12;
+    std::string productNameWithoutSpaces = productName;
+    productNameWithoutSpaces.erase(std::remove_if(productNameWithoutSpaces.begin(), productNameWithoutSpaces.end(), ::isspace), productNameWithoutSpaces.end());
+    
+    // calculate all files number to zipup
+    gnAllFilesNum = 0;
+    // RR
+    {
+        filesToZip = filesToZipBase;
+        gnAllFilesNum += getFilesNumInVector(filesToZip);
+    }
+    // RR1
     if (fs::exists(phpDir + "\\oto1.php")) {
-        filesToZip.push_back(htmlDir + "\\files_oto1");
-        filesToZip.push_back(htmlDir + "\\images_oto1");
-        filesToZip.push_back(htmlDir + "\\oto1.html");
-        filesToZip.push_back(htmlDir + "\\thankyou_with_oto1.html");
-        zipFile_sufix += "1";
+        filesToZip1 = filesToZipBase;
+        filesToZip1.push_back(htmlDir + "\\files_oto1");
+        filesToZip1.push_back(htmlDir + "\\images_oto1");
+        filesToZip1.push_back(htmlDir + "\\oto1.html");
+        filesToZip1.push_back(htmlDir + "\\thankyou_with_oto1.html");
+        gnAllFilesNum += getFilesNumInVector(filesToZip1);
     }
+    // RR2
     if (fs::exists(phpDir + "\\oto2.php")) {
-        filesToZip.push_back(htmlDir + "\\files_oto2");
-        filesToZip.push_back(htmlDir + "\\images_oto2");
-        filesToZip.push_back(htmlDir + "\\oto2.html");
-        filesToZip.push_back(htmlDir + "\\thankyou_with_oto2.html");
-        zipFile_sufix += "2";
+        filesToZip2 = filesToZipBase;
+        filesToZip2.push_back(htmlDir + "\\files_oto2");
+        filesToZip2.push_back(htmlDir + "\\images_oto2");
+        filesToZip2.push_back(htmlDir + "\\oto2.html");
+        filesToZip2.push_back(htmlDir + "\\thankyou_with_oto2.html");
+        gnAllFilesNum += getFilesNumInVector(filesToZip2);
     }
-    // Create zip file
-    std::string zipPath = htmlDir + "\\ProductName_RR";
-    if (zipFile_sufix.length() > 0)
-        zipPath += "OTO" + zipFile_sufix;
-    zipPath += ".zip";
-
-    //gnAllFilesNum = filesToZip.size();
+    // RR12
+    if (fs::exists(phpDir + "\\oto1.php") && fs::exists(phpDir + "\\oto2.php")) {
+        filesToZip12 = filesToZip1;
+        filesToZip12.push_back(htmlDir + "\\files_oto2");
+        filesToZip12.push_back(htmlDir + "\\images_oto2");
+        filesToZip12.push_back(htmlDir + "\\oto2.html");
+        filesToZip12.push_back(htmlDir + "\\thankyou_with_oto2.html");
+        gnAllFilesNum += getFilesNumInVector(filesToZip12);
+    }
     gnCurFile = 0;
-    CreateZip(zipPath, filesToZip, hwnd);
+
+    // RR
+    {
+        std::string zipPath = htmlDir + "\\" + productNameWithoutSpaces + "_RR.zip";
+        CreateZip(zipPath, filesToZip, hwnd);
+    }
+    // RR1
+    if (fs::exists(phpDir + "\\oto1.php")) {
+        std::string zipPath = htmlDir + "\\" + productNameWithoutSpaces + "_RROTO1.zip";
+        CreateZip(zipPath, filesToZip1, hwnd);
+    }
+    // RR2
+    if (fs::exists(phpDir + "\\oto2.php")) {
+        std::string zipPath = htmlDir + "\\" + productNameWithoutSpaces + "_RROTO2.zip";
+        CreateZip(zipPath, filesToZip2, hwnd);
+    }
+    // RR12
+    if (fs::exists(phpDir + "\\oto2.php")) {
+        std::string zipPath = htmlDir + "\\" + productNameWithoutSpaces + "_RROTO12.zip";
+        CreateZip(zipPath, filesToZip12, hwnd);
+    }
 
     // delete uncompressed files
     if (deleteUncompressedFiles) {

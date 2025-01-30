@@ -1,12 +1,7 @@
 #include <windows.h>
-#include <commctrl.h>
-#include <string>
-#include <fstream>
-#include <iostream>
-#include <vector>
 #include "Resource.h"
+#include <vector>
 #include <shlobj.h> // For SHBrowseForFolder
-#include <map>
 #include <sstream>
 #include <iostream>
 
@@ -19,6 +14,8 @@ HWND hProgressBar, hInputPHPDir, hInputTemplateDir, hInputHTMLDir, hProductName,
 // Function prototypes
 void CreateControls(HWND);
 void ResizeControls(HWND hwnd, int w, int h);
+void DetectEmails(HWND hwnd);
+
 std::string BrowseFolder(HWND);
 void ProcessFiles(const std::string&, const std::string&);
 
@@ -138,6 +135,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     {
     case WM_CREATE:
         CreateControls(hwnd);
+        DetectEmails(hwnd);
         break;
     case WM_SIZE:
         ResizeControls(hwnd, LOWORD(lParam), HIWORD(lParam));
@@ -156,6 +154,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     SetWindowText(hInputPHPDir, selectedDir.c_str());
                     std::string htmlDir = selectedDir + "\\_HTML RESELLERS";
                     SetWindowText(hInputHTMLDir, htmlDir.c_str());
+                    DetectEmails(hwnd);
                 }
             }
             break;
@@ -193,6 +192,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 GetWindowText(hProductName, productName, 100);
                 GetWindowText(hClassField, classesToKeep, 100);
                 GetWindowText(hReplaceDir, replaceDir, MY_MAX_PATH);
+
+                std::map<std::string, std::string>  emailMap;
+                for (int i = 0; i < MAX_EMAILS_NUM; i++) {
+                    char _in[MAX_PATH], _out[MAX_PATH];
+                    GetWindowText(GetDlgItem(hwnd, 1010 + 10 * i + 2), _in, MAX_PATH);
+                    if (strlen(_in) <= 0)
+                        continue;
+                    GetWindowText(GetDlgItem(hwnd, 1010 + 10 * i + 4), _out, MAX_PATH);
+                    if (strlen(_out) <= 0 || !strcmp(_out, "(none)"))
+                        continue;
+                    emailMap.insert({ _in, _out });
+                }
+
                 GetWindowText(hYourLink, yourLink, 500); // Get the value of Your Link
 
                 bool deleteUncompressedFiles = SendMessage(hCheckboxDelete, BM_GETCHECK, 0, 0) == BST_CHECKED;
@@ -211,7 +223,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 };
                 SaveConfig("config.ini", config);
 
-                StartConversion(hwnd, phpDir, templateDir, htmlDir, productName, classesToKeep, replaceDir, deleteUncompressedFiles, yourLink);
+                StartConversion(hwnd, phpDir, templateDir, htmlDir, productName, classesToKeep, replaceDir, emailMap, yourLink, deleteUncompressedFiles);
             }
             break;
         }
@@ -220,11 +232,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     case WM_DESTROY:
         PostQuitMessage(0);
         break;
-
-    default:
-        return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
-    return 0;
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
@@ -246,7 +255,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         CLASS_NAME,
         "PHP to HTML Site Converter",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 1000, 700,
+        CW_USEDEFAULT, CW_USEDEFAULT, 1000, 950,
         NULL, NULL, hInstance, NULL
     );
 
@@ -264,6 +273,21 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     return 0;
 }
 
+LRESULT CALLBACK EditSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+{
+    if (uMsg == WM_KEYDOWN)
+    {
+        if (wParam == 'A' && (GetKeyState(VK_CONTROL) & 0x8000))
+        {
+            SendMessage(hWnd, EM_SETSEL, 0, -1); // Select all text
+            return 0; // Mark as handled
+        }
+    }
+
+    // Call the default window procedure for other messages
+    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
+
 void CreateControls(HWND hwnd)
 {
     std::map<std::string, std::string> config = LoadConfig("config.ini");
@@ -279,27 +303,46 @@ void CreateControls(HWND hwnd)
 
     CreateWindow("STATIC", "PHP Directory:", WS_VISIBLE | WS_CHILD, 20, 20, 150, 20, hwnd, NULL, NULL, NULL);
     hInputPHPDir = CreateWindow("EDIT", phpDir.c_str(), WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 20, 400, 20, hwnd, NULL, NULL, NULL);
+    SetWindowSubclass(hInputPHPDir, EditSubclassProc, 0, 0); // Apply subclassing
     CreateWindow("BUTTON", "...", WS_VISIBLE | WS_CHILD, 570, 20, 30, 20, hwnd, (HMENU)3, NULL, NULL);
 
     CreateWindow("STATIC", "Template Directory:", WS_VISIBLE | WS_CHILD, 20, 60, 150, 20, hwnd, NULL, NULL, NULL);
     hInputTemplateDir = CreateWindow("EDIT", templateDir.c_str(), WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 60, 400, 20, hwnd, NULL, NULL, NULL);
+    SetWindowSubclass(hInputTemplateDir, EditSubclassProc, 0, 0); // Apply subclassing
     CreateWindow("BUTTON", "...", WS_VISIBLE | WS_CHILD, 570, 60, 30, 20, hwnd, (HMENU)11, NULL, NULL);
 
     CreateWindow("STATIC", "HTML Directory:", WS_VISIBLE | WS_CHILD, 20, 100, 150, 20, hwnd, NULL, NULL, NULL);
     hInputHTMLDir = CreateWindow("EDIT", htmlDir.c_str(), WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 100, 400, 20, hwnd, NULL, NULL, NULL);
+    SetWindowSubclass(hInputHTMLDir, EditSubclassProc, 0, 0); // Apply subclassing
     CreateWindow("BUTTON", "...", WS_VISIBLE | WS_CHILD, 570, 100, 30, 20, hwnd, (HMENU)4, NULL, NULL);
 
     CreateWindow("STATIC", "Product Name:", WS_VISIBLE | WS_CHILD, 20, 140, 150, 20, hwnd, NULL, NULL, NULL);
     hProductName = CreateWindow("EDIT", productName.c_str(), WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 140, 400, 20, hwnd, NULL, NULL, NULL);
+    SetWindowSubclass(hProductName, EditSubclassProc, 0, 0); // Apply subclassing
 
     CreateWindow("STATIC", "Classes to Keep:", WS_VISIBLE | WS_CHILD, 20, 180, 150, 20, hwnd, NULL, NULL, NULL);
     hClassField = CreateWindow("EDIT", classesToKeep.c_str(), WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 180, 400, 20, hwnd, NULL, NULL, NULL);
+    SetWindowSubclass(hClassField, EditSubclassProc, 0, 0); // Apply subclassing
 
     CreateWindow("STATIC", "Replace Directory:", WS_VISIBLE | WS_CHILD, 20, 220, 150, 20, hwnd, NULL, NULL, NULL);
     hReplaceDir = CreateWindow("EDIT", replaceDir.c_str(), WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 220, 400, 20, hwnd, NULL, NULL, NULL);
+    SetWindowSubclass(hReplaceDir, EditSubclassProc, 0, 0); // Apply subclassing
 
-    CreateWindow("STATIC", "Email Links:", WS_VISIBLE | WS_CHILD, 20, 260, 150, 20, hwnd, NULL, NULL, NULL);
+    CreateWindow("STATIC", "Assign Emails:", WS_VISIBLE | WS_CHILD, 20, 180, 150, 20, hwnd, (HMENU)1000, NULL, NULL);
+    CreateWindow("STATIC", "Source Site Emails (detected)", WS_VISIBLE | WS_CHILD, 20, 180, 150, 20, hwnd, (HMENU)1001, NULL, NULL);
+    CreateWindow("STATIC", "Client's Destination Emails (emails/*.txt)", WS_VISIBLE | WS_CHILD, 20, 180, 150, 20, hwnd, (HMENU)1002, NULL, NULL);
+    for (int i = 0; i < MAX_EMAILS_NUM; ++i)
+    {
+        std::string label = "Email " + std::to_string(i + 1) + ":";
+        CreateWindow("STATIC", label.c_str(), WS_VISIBLE | WS_CHILD, 20, 290 + (i * 30), 100, 20, hwnd, (HMENU)(1010 + i * 10 + 1), NULL, NULL);
+        CreateWindow("EDIT", "", WS_VISIBLE | WS_CHILD | WS_BORDER, 130, 290 + (i * 30), 200, 20, hwnd, (HMENU)(1010 + i * 10 + 2), NULL, NULL);
+        CreateWindow("STATIC", (std::string("    =====>    ") + label).c_str(), WS_VISIBLE | WS_CHILD, 340, 290 + (i * 30), 20, 20, hwnd, (HMENU)(1010 + i * 10 + 3), NULL, NULL);
+        CreateWindow("EDIT", "", WS_VISIBLE | WS_CHILD | WS_BORDER, 370, 290 + (i * 30), 200, 20, hwnd, (HMENU)(1010 + i * 10 + 4), NULL, NULL);
+    }
+
+    CreateWindow("STATIC", "Email Links:", WS_VISIBLE | WS_CHILD, 20, 260, 150, 20, hwnd, (HMENU)12, NULL, NULL);
     hYourLink = CreateWindow("EDIT", yourLink.c_str(), WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 260, 400, 20, hwnd, NULL, NULL, NULL);
+    SetWindowSubclass(hYourLink, EditSubclassProc, 0, 0); // Apply subclassing
 
     hCheckboxDelete = CreateWindow("BUTTON", "Delete Uncompressed Files", WS_VISIBLE | WS_CHILD | BS_AUTOCHECKBOX, 20, 300, 200, 20, hwnd, NULL, NULL, NULL);
     if (deleteUncompressedFiles) SendMessage(hCheckboxDelete, BM_SETCHECK, BST_CHECKED, 0);
@@ -309,7 +352,8 @@ void CreateControls(HWND hwnd)
     hProgressBar = CreateWindow(PROGRESS_CLASS, NULL, WS_VISIBLE | WS_CHILD, 20, 390, 570, 20, hwnd, (HMENU)5, NULL, NULL);
     SendMessage(hProgressBar, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
 
-    CreateWindow("EDIT", "", WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | WS_VSCROLL | ES_READONLY, 20, 430, 570, 200, hwnd, (HMENU)2, NULL, NULL);
+    HWND hLog = CreateWindow("EDIT", "", WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | WS_VSCROLL | ES_READONLY, 20, 430, 570, 200, hwnd, (HMENU)2, NULL, NULL);
+    SendMessage(hLog, EM_LIMITTEXT, (WPARAM)-1, 0);
 }
 
 void ResizeControls(HWND hwnd, int w, int h)
@@ -326,10 +370,46 @@ void ResizeControls(HWND hwnd, int w, int h)
     SetWindowPos(hProductName, NULL, 160, 140, w - 160 - 15, 20, SWP_NOZORDER);
     SetWindowPos(hClassField, NULL, 160, 180, w - 160 - 15, 20, SWP_NOZORDER);
     SetWindowPos(hReplaceDir, NULL, 160, 220, w - 160 - 15, 20, SWP_NOZORDER);
-    SetWindowPos(hYourLink, NULL, 160, 260, w - 160 - 15, 20, SWP_NOZORDER);
 
-    SetWindowPos(hCreateButton, NULL, (w-200)/2, 340, 200, 30, SWP_NOZORDER);
+    SetWindowPos(GetDlgItem(hwnd, 1000), NULL, 20, 260, 150, 20, SWP_NOZORDER);
+    SetWindowPos(GetDlgItem(hwnd, 1001), NULL, 160, 260, 300, 20, SWP_NOZORDER);
+    SetWindowPos(GetDlgItem(hwnd, 1002), NULL, w/2 + 160, 260, 300, 20, SWP_NOZORDER);
+    for (int i = 0; i < MAX_EMAILS_NUM; ++i)
+    {
+        SetWindowPos(GetDlgItem(hwnd, 1010 + 10 * i + 1), NULL, 80, 290 + 30 * i, 75, 20, SWP_NOZORDER);
+        SetWindowPos(GetDlgItem(hwnd, 1010 + 10 * i + 2), NULL, 160, 290 + 30 * i, (w - 20 - 20) / 2 - 160, 20, SWP_NOZORDER);
+        SetWindowPos(GetDlgItem(hwnd, 1010 + 10 * i + 3), NULL, w/2, 290 + 30 * i, 155, 20, SWP_NOZORDER);
+        SetWindowPos(GetDlgItem(hwnd, 1010 + 10 * i + 4), NULL, w/2 + 160, 290 + 30 * i, (w - 20 - 20) / 2 - 160, 20, SWP_NOZORDER);
+    }
 
-    SetWindowPos(hProgressBar, NULL, 20, 390, w - 20*2, 20, SWP_NOZORDER);
-    SetWindowPos(GetDlgItem(hwnd, 2), NULL, 20, 430, w - 20*2, h > 550 ? (h-450) : 100, SWP_NOZORDER);
+    SetWindowPos(GetDlgItem(hwnd, 12), NULL, 20, EMAILS_FOOT_Y, 160, 20, SWP_NOZORDER);
+    SetWindowPos(hYourLink, NULL, 160, EMAILS_FOOT_Y, w - 160 - 15, 20, SWP_NOZORDER);
+
+    SetWindowPos(hCheckboxDelete, NULL, 160, EMAILS_FOOT_Y + 40, w - 160 - 15, 20, SWP_NOZORDER);
+
+    SetWindowPos(hCreateButton, NULL, (w-200)/2, EMAILS_FOOT_Y + 80, 200, 30, SWP_NOZORDER);
+
+    SetWindowPos(hProgressBar, NULL, 20, EMAILS_FOOT_Y + 120, w - 20*2, 20, SWP_NOZORDER);
+    SetWindowPos(GetDlgItem(hwnd, 2), NULL, 20, EMAILS_FOOT_Y + 160, w - 20 * 2, h > (EMAILS_FOOT_Y+260) ? (h - EMAILS_FOOT_Y - 180) : 80, SWP_NOZORDER);
+}
+
+void DetectEmails(HWND hwnd)
+{
+    char phpDir[MY_MAX_PATH], templateDir[MY_MAX_PATH];
+    GetWindowText(hInputPHPDir, phpDir, MY_MAX_PATH);
+    GetWindowText(hInputTemplateDir, templateDir, MY_MAX_PATH);
+
+    int iEmail = 0;
+    for (const auto& entry : fs::directory_iterator(std::string(phpDir)))
+    {
+        std::string newFile = entry.path().filename().string();
+        std::string templateFilePath = std::string(templateDir) + "\\" + newFile;
+        if (entry.is_directory())
+            continue;
+        if (newFile.find("broadcast") == std::string::npos)
+            continue;
+        SetDlgItemText(hwnd, 1010 + 10 * iEmail + 2, newFile.c_str());
+        SetDlgItemText(hwnd, 1010 + 10 * iEmail + 4, (std::string("broadcast") + std::to_string(iEmail+1) + ".txt").c_str());
+        iEmail++;
+    }
 }
