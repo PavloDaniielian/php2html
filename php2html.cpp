@@ -19,13 +19,13 @@ void DetectEmails(HWND hwnd);
 std::string BrowseFolder(HWND);
 void ProcessFiles(const std::string&, const std::string&);
 
-// Function to save configuration settings to config.ini
+// Function to save configuration settings to setting.ini
 void SaveConfig(const std::string& filePath, const std::map<std::string, std::string>& config)
 {
     std::ofstream configFile(filePath);
     if (!configFile.is_open())
     {
-        std::cerr << "Failed to open config.ini for writing." << std::endl;
+        std::cerr << "Failed to open setting.ini for writing." << std::endl;
         return;
     }
     for (const std::pair<const std::string, std::string>& pair : config)
@@ -35,7 +35,7 @@ void SaveConfig(const std::string& filePath, const std::map<std::string, std::st
     configFile.close();
 }
 
-// Function to load configuration settings from config.ini
+// Function to load configuration settings from setting.ini
 std::map<std::string, std::string> LoadConfig(const std::string& filePath)
 {
     std::map<std::string, std::string> config = {
@@ -221,7 +221,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     {"deleteUncompressedFiles", deleteUncompressedFiles ? "true" : "false"},
                     {"yourLink", yourLink}
                 };
-                SaveConfig("config.ini", config);
+                SaveConfig("setting.ini", config);
 
                 StartConversion(hwnd, phpDir, templateDir, htmlDir, productName, classesToKeep, replaceDir, emailMap, yourLink, deleteUncompressedFiles);
             }
@@ -290,7 +290,7 @@ LRESULT CALLBACK EditSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lP
 
 void CreateControls(HWND hwnd)
 {
-    std::map<std::string, std::string> config = LoadConfig("config.ini");
+    std::map<std::string, std::string> config = LoadConfig("setting.ini");
 
     std::string phpDir = config["phpDir"];
     std::string templateDir = config["templateDir"];
