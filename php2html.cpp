@@ -327,7 +327,7 @@ void CreateControls(HWND hwnd)
     CreateWindow("STATIC", "Replace Directory:", WS_VISIBLE | WS_CHILD, 20, 220, 150, 20, hwnd, NULL, NULL, NULL);
     hReplaceDir = CreateWindow("EDIT", replaceDir.c_str(), WS_VISIBLE | WS_CHILD | WS_BORDER, 160, 220, 400, 20, hwnd, NULL, NULL, NULL);
     SetWindowSubclass(hReplaceDir, EditSubclassProc, 0, 0); // Apply subclassing
-
+    
     CreateWindow("STATIC", "Assign Emails:", WS_VISIBLE | WS_CHILD, 20, 180, 150, 20, hwnd, (HMENU)1000, NULL, NULL);
     CreateWindow("STATIC", "Source Site Emails (detected)", WS_VISIBLE | WS_CHILD, 20, 180, 150, 20, hwnd, (HMENU)1001, NULL, NULL);
     CreateWindow("STATIC", "Client's Destination Emails (emails/*.txt)", WS_VISIBLE | WS_CHILD, 20, 180, 150, 20, hwnd, (HMENU)1002, NULL, NULL);
@@ -398,6 +398,9 @@ void DetectEmails(HWND hwnd)
     char phpDir[MY_MAX_PATH], templateDir[MY_MAX_PATH];
     GetWindowText(hInputPHPDir, phpDir, MY_MAX_PATH);
     GetWindowText(hInputTemplateDir, templateDir, MY_MAX_PATH);
+
+    if (!fs::exists(phpDir))
+        return;
 
     int iEmail = 0;
     for (const auto& entry : fs::directory_iterator(std::string(phpDir)))
